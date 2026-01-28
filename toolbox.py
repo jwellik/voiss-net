@@ -20,6 +20,7 @@ from matplotlib.colors import ListedColormap
 from obspy import UTCDateTime, Stream, Trace, Inventory, read_inventory
 from obspy.clients.fdsn import Client as FDSN_Client
 from obspy.clients.fdsn.header import FDSNNoDataException
+from obspy.clients.filesystem.sds import Client as SDS_Client
 from obspy.geodetics import gps2dist_azimuth
 from ordpy import complexity_entropy
 from scipy.signal import spectrogram, find_peaks, medfilt
@@ -127,6 +128,76 @@ def download_data(source,network,station,location,channel,starttime,endtime,data
     # Conclude process
     time_end = time.time()
     print('Data & metadata collection complete. Time taken: %.2f minutes.' % ((time_end - time_start) / 60))
+
+def read_sds(sds_root, network, station, location, channel, starttime, endtime, merge=-1, verbose=True):
+    """
+    Reads waveform data from a SeisComP Data Structure (SDS) directory tree.
+    :param sds_root (str): Root directory of the SDS archive
+    :param network (str): SEED network code [wildcards (``*``, ``?``) accepted]
+    :param station (str): SEED station code [wildcards (``*``, ``?``) accepted]
+    :param location (str): SEED location code [wildcards (``*``, ``?``) accepted]
+    :param channel (str): SEED channel code [wildcards (``*``, ``?``) accepted]
+    :param starttime (:class:`~obspy.core.utcdatetime.UTCDateTime`): Start time for desired data pull
+    :param endtime (:class:`~obspy.core.utcdatetime.UTCDateTime`): End time for desired data pull
+    :param merge (int or None): Specifies merge operation on returned stream. Default (-1) performs conservative cleanup merge. Set to `None` to skip merging.
+    :param verbose (bool): If `True`, print status messages. Default is `True`.
+    :return: Stream (:class:`~obspy.core.stream.Stream`) data object
+    """
+    
+    if verbose:
+        print('Reading waveforms from SDS archive at %s...' % sds_root)
+    
+    # Initialize SDS client
+    client = SDS_Client(sds_root)
+    
+    # Get waveforms
+    stream = client.get_waveforms(network=network, station=station, location=location, 
+                                  channel=channel, starttime=starttime, endtime=endtime, 
+                                  merge=merge)
+    
+    if verbose:
+        if len(stream) == 0:
+            print('No data found in SDS archive for the specified parameters.')
+        else:
+            print('Successfully read %d trace(s) from SDS archive.' % len(stream))
+            print(stream.__str__(extended=True))
+    
+    return stream
+
+def add_station_metadata(stream, coord_filepath, verbose=True):
+    """
+    Adds station coordinates (latitude, longitude, elevation) to traces in a stream from a JSON coordinate file.
+    :param stream (:class:`~obspy.core.stream.Stream`): Input data stream
+    :param coord_filepath (str): Path to JSON file containing station coordinates. 
+        Expected format: {"STATION_CODE": [latitude, longitude, elevation], ...}
+    :param verbose (bool): If `True`, print status messages. Default is `True`.
+    :return: Stream (:class:`~obspy.core.stream.Stream`) with coordinates attached
+    """
+    
+    if verbose:
+        print('Adding station metadata from %s...' % coord_filepath)
+    
+    # Load coordinate file
+    with open(coord_filepath, 'r') as f:
+        local_coords = json.load(f)
+    
+    # Assign coordinates to each trace
+    for tr in stream:
+        try:
+            tr.stats.latitude, tr.stats.longitude, tr.stats.elevation = local_coords[tr.stats.station]
+            if verbose:
+                print('Added coordinates for %s: lat=%.4f, lon=%.4f, elev=%.1f' % 
+                      (tr.stats.station, tr.stats.latitude, tr.stats.longitude, tr.stats.elevation))
+        except KeyError:
+            if verbose:
+                print('Warning: No coordinates available for station %s in coordinate file.' % tr.stats.station)
+            # Optionally raise an error instead of just warning
+            # raise KeyError(f'No coordinates available for {tr.id}.')
+    
+    if verbose:
+        print('Station metadata assignment complete.')
+    
+    return stream
 
 def process_waveform(stream,remove_response=True,rr_output='VEL',detrend=False,taper_length=None,taper_percentage=None,filter_band=None,verbose=True):
 
@@ -588,11 +659,11 @@ def calculate_spectrogram(trace,starttime,endtime,window_duration,freq_lims,over
 
 def check_timeline(stream, starttime, endtime, model_path, meanvar_path, overlap, pnorm_thresh=None, generate_fig=True,
                    fig_width=32, fig_height=None, font_s=22, spec_kwargs=None, dr_kwargs=None, fi_kwargs=None,
-                   export_path=None, transparent=False):
+                   export_path=None, transparent=False, remove_response=True):
 
     """
     Calculates spectrograms from an input stream and runs it through a VOISS-Net model to predict the timeline of classes.
-    :param stream (:class:`~obspy.core.stream.Stream`): Input data, with response attached
+    :param stream (:class:`~obspy.core.stream.Stream`): Input data, with response attached (if remove_response=True)
     :param starttime (:class:`~obspy.core.utcdatetime.UTCDateTime`): Start time for model run (must be within stream's time range)
     :param endtime (:class:`~obspy.core.utcdatetime.UTCDateTime`): End time for model run (must be within stream's time range)
     :param model_path (str): Path to model .keras or .h5 file
@@ -608,6 +679,7 @@ def check_timeline(stream, starttime, endtime, model_path, meanvar_path, overlap
     :param fi_kwargs (dict): Dictionary of frequency index plotting parameters (reference_station, window_length, overlap, filomin, filomax, fiupmin, fiupmax, med_filt_kernel)
     :param export_path (str): (str or `None`): If str, export plotted figures as '.png' files, named by the trace id and time. If `None`, show figure in interactive python.
     :param transparent (bool): If `True`, export with transparent background
+    :param remove_response (bool): If `True`, remove instrument response. If `False`, skip response removal. Default is `True`.
     :return: numpy.ndarray: 2D matrix storing all predicted classes (only returns if generate_fig==False or export_path==None)
     :return: numpy.ndarray: 2D matrix storing all predicted probabilities (only returns if generate_fig==False or export_path==None)
     """
@@ -668,7 +740,7 @@ def check_timeline(stream, starttime, endtime, model_path, meanvar_path, overlap
     duration_allowance = np.min([abs(starttime - stream_start), abs(endtime - stream_end)])
     taper_length = np.max([int(duration_allowance/2/window_duration)*window_duration, window_duration])
     # NOTE: for 1:1 compatability with version 1's check_timline, use pad=360
-    stream_processed = process_waveform(stream.copy(), remove_response=True, detrend=False,
+    stream_processed = process_waveform(stream.copy(), remove_response=remove_response, detrend=False,
                                         taper_length=taper_length, verbose=False)
 
     # If stream sampling rate is not an integer, fix
