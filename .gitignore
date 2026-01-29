@@ -1,0 +1,32 @@
+# macOS Finder and Python stuff
+.DS_Store
+models/.DS_Store
+**/._.DS_Store
+**/__pycache__
+**/__pycache__/*
+**/.idea
+**/.idea/*
+**/.ipynb_checkpoints
+**/.ipynb_checkpoints/*
+
+# publication related items
+**/data_frames
+**/figures
+**/metrics
+**/pavlof_webcam_images
+**/plotting_scripts
+**/timeline_plots
+**/timeline_plots_tam
+timeline_plot_tam*
+timeline_checker_*
+
+# pre release
+/labels/labels_20230215.json
+/labels/labels_20230314_infra.json
+/labels/Semi_tremor_labels_20210701_20210831.json
+/models/old_models
+/models/other_models
+/train_voiss_net_semisopochnoi.py
+/debugger.py
+/retired_code/
+/labeled_npy_files/
