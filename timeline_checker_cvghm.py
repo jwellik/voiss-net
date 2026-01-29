@@ -5,10 +5,11 @@ from toolbox import read_sds, add_station_metadata, check_timeline
 
 # Define variables for SDS data reading
 SDS_ROOT = "/VDAP-NAS/jwellik/DATA/CVGHM/IBU/SDS/"  # Update with your SDS root directory
-NETWORK = "VG,VG"
-STATION = "GIN,IBKL"  # Update with your station codes
-LOCATION = "00,1L"
-CHANNEL = "EHZ,HHZ"
+NETWORK = "VG"
+STATION = "GIN,IBKC,IBTB,IBTL"  # Update with your station codes
+LOCATION = "00,1L,1L,1L"
+CHANNEL = "EHZ,HHZ,HHZ,HHZ"
+
 STARTTIME = UTCDateTime(2025, 1, 1, 0, 0)  # Update with your start time
 ENDTIME = STARTTIME + 3*3600  # 3 hours
 PAD = 360  # s
