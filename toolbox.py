@@ -1496,7 +1496,7 @@ def check_timeline_binned(stream, spec_station, starttime, endtime, model_path, 
 
 
 def generate_timeline_indicators(data_keys: dict, starttime, endtime, processing_step, model_path, meanvar_path,
-                                 overlap, spec_kwargs=None, export_path=None, n_jobs=1):
+                                 overlap, spec_kwargs=None, export_path=None, n_jobs=1, remove_response=True):
 
     """
     Pulls data from an online repository or loads it from a local miniSEED directory
@@ -1538,6 +1538,7 @@ def generate_timeline_indicators(data_keys: dict, starttime, endtime, processing
     :param spec_kwargs (dict): Dictionary of spectrogram plotting parameters (pad, window_duration, freq_lims, v_percent_lims)
     :param export_path (str): (str or `None`): If str, export indicators in a .pkl with the full filepath export_path + 'indicators.pkl'
     :param n_jobs (int): Number of CPUs used for data retrieval in parallel. If n_jobs = -1, all CPUs are used. If n_jobs < -1, (n_cpus + 1 + n_jobs) are used. Default is 1 (a single processor).
+    :param remove_response (bool): If `True`, attach and use inventory for response removal. If `False`, skip inventory attachment. Default is `True`. When `False`, `metadata_file` in data_keys is optional.
     """
 
     # Check if data source is from Client or from a miniseed directory, then define all the corresponding variables
@@ -1553,7 +1554,13 @@ def generate_timeline_indicators(data_keys: dict, starttime, endtime, processing
         print("Data keys indicate data load from miniseed directory. Commencing...\n")
         local = True
         data_dir = data_keys["data_dir"]
-        metadata_file = data_keys["metadata_file"]
+        # metadata_file is only required if remove_response is True
+        if remove_response:
+            if "metadata_file" not in data_keys:
+                raise ValueError("metadata_file is required in data_keys when remove_response=True")
+            metadata_file = data_keys["metadata_file"]
+        else:
+            metadata_file = data_keys.get("metadata_file", None)
         coord_file = data_keys["coord_file"]
         network = data_keys["network"]
         station = data_keys["station"]
@@ -1639,8 +1646,10 @@ def generate_timeline_indicators(data_keys: dict, starttime, endtime, processing
             stream = read_local(data_dir=data_dir, coord_file=coord_file, network=network, station=station,
                                 location=location, channel=channel, starttime=t1 - pad, endtime=t2 + pad,
                                 pattern=pattern)
-            inventory = read_inventory(metadata_file)
-            stream.attach_response(inventory)
+            # Only attach inventory if remove_response is True
+            if remove_response:
+                inventory = read_inventory(metadata_file)
+                stream.attach_response(inventory)
 
         # If stream sampling rate is not an integer, fix
         for tr in stream:
