@@ -129,12 +129,20 @@ def download_data(source,network,station,location,channel,starttime,endtime,data
     time_end = time.time()
     print('Data & metadata collection complete. Time taken: %.2f minutes.' % ((time_end - time_start) / 60))
 
-def read_sds(sds_root, network, station, location, channel, starttime, endtime, merge=-1, verbose=True):
+def read_sds(sds_root, network, station, location, channel, starttime, endtime, merge=-1,
+             merge_fill_gaps=True, fill_value=0, verbose=True):
     """
     Reads waveform data from a SeisComP Data Structure (SDS) directory tree.
     Supports multiple stations via comma-separated NETWORK, STATION, LOCATION, CHANNEL
     (e.g. NETWORK="VG,VG", STATION="GIN,IBKL", LOCATION="00,1L", CHANNEL="EHZ,HHZ").
     Uses get_waveforms_bulk() when multiple (net, sta, loc, cha) specs are given.
+
+    When a single channel is split into multiple traces (e.g. due to data gaps),
+    merge_fill_gaps ensures one trace per channel by merging gapped segments.
+    Gap times are filled with fill_value (default 0). Downstream spectrogram
+    gap-removal may drop those slices; otherwise they may be classified as
+    low-quality (e.g. noise). Contiguous data is unchanged.
+
     :param sds_root (str): Root directory of the SDS archive
     :param network (str): SEED network code(s); comma-separated for multiple [wildcards (``*``, ``?``) accepted]
     :param station (str): SEED station code(s); comma-separated for multiple
@@ -143,6 +151,8 @@ def read_sds(sds_root, network, station, location, channel, starttime, endtime, 
     :param starttime (:class:`~obspy.core.utcdatetime.UTCDateTime`): Start time for desired data pull
     :param endtime (:class:`~obspy.core.utcdatetime.UTCDateTime`): End time for desired data pull
     :param merge (int or None): Specifies merge operation on returned stream. Default (-1) performs conservative cleanup merge. Set to `None` to skip merging.
+    :param merge_fill_gaps (bool): If `True` (default), after the initial merge, merge any remaining same-ID (gapped) traces into one trace per channel using fill_value for gaps. Ensures compatibility with downstream code that assumes one trace per channel.
+    :param fill_value (int, float, or str): Value used to fill gaps when merge_fill_gaps is True. Default 0. Use e.g. ``'interpolate'`` for linear interpolation.
     :param verbose (bool): If `True`, print status messages. Default is `True`.
     :return: Stream (:class:`~obspy.core.stream.Stream`) data object
     """
@@ -190,6 +200,10 @@ def read_sds(sds_root, network, station, location, channel, starttime, endtime, 
         stream = client.get_waveforms_bulk(bulk)
         if merge is not None:
             stream.merge(merge)
+    
+    # Ensure one trace per channel: merge gapped same-ID segments (e.g. from split files)
+    if merge is not None and merge_fill_gaps and len(stream) > 0:
+        stream.merge(method=0, fill_value=fill_value)
     
     if verbose:
         if len(stream) == 0:

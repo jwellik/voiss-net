@@ -10,7 +10,7 @@ STATION = "GIN,IBKC,IBTB,IBTL"  # Update with your station codes
 LOCATION = "00,1L,1L,1L"
 CHANNEL = "EHZ,HHZ,HHZ,HHZ"
 
-STARTTIME = UTCDateTime(2025, 1, 1, 0, 0)  # Update with your start time
+STARTTIME = UTCDateTime(2025, 1, 2, 0, 0)  # Update with your start time
 ENDTIME = STARTTIME + 3*3600  # 3 hours
 PAD = 360  # s
 
