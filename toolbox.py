@@ -132,11 +132,14 @@ def download_data(source,network,station,location,channel,starttime,endtime,data
 def read_sds(sds_root, network, station, location, channel, starttime, endtime, merge=-1, verbose=True):
     """
     Reads waveform data from a SeisComP Data Structure (SDS) directory tree.
+    Supports multiple stations via comma-separated NETWORK, STATION, LOCATION, CHANNEL
+    (e.g. NETWORK="VG,VG", STATION="GIN,IBKL", LOCATION="00,1L", CHANNEL="EHZ,HHZ").
+    Uses get_waveforms_bulk() when multiple (net, sta, loc, cha) specs are given.
     :param sds_root (str): Root directory of the SDS archive
-    :param network (str): SEED network code [wildcards (``*``, ``?``) accepted]
-    :param station (str): SEED station code [wildcards (``*``, ``?``) accepted]
-    :param location (str): SEED location code [wildcards (``*``, ``?``) accepted]
-    :param channel (str): SEED channel code [wildcards (``*``, ``?``) accepted]
+    :param network (str): SEED network code(s); comma-separated for multiple [wildcards (``*``, ``?``) accepted]
+    :param station (str): SEED station code(s); comma-separated for multiple
+    :param location (str): SEED location code(s); comma-separated for multiple
+    :param channel (str): SEED channel code(s); comma-separated for multiple
     :param starttime (:class:`~obspy.core.utcdatetime.UTCDateTime`): Start time for desired data pull
     :param endtime (:class:`~obspy.core.utcdatetime.UTCDateTime`): End time for desired data pull
     :param merge (int or None): Specifies merge operation on returned stream. Default (-1) performs conservative cleanup merge. Set to `None` to skip merging.
@@ -147,13 +150,46 @@ def read_sds(sds_root, network, station, location, channel, starttime, endtime, 
     if verbose:
         print('Reading waveforms from SDS archive at %s...' % sds_root)
     
+    # Parse comma-separated specs (single value broadcasts to all)
+    def _split_or_single(s):
+        s = str(s).strip()
+        if "," in s:
+            return [x.strip() for x in s.split(",")]
+        return [s]
+    
+    nets = _split_or_single(network)
+    stas = _split_or_single(station)
+    locs = _split_or_single(location)
+    chas = _split_or_single(channel)
+    
+    n = max(len(nets), len(stas), len(locs), len(chas))
+    for name, lst in [("NETWORK", nets), ("STATION", stas), ("LOCATION", locs), ("CHANNEL", chas)]:
+        if len(lst) != 1 and len(lst) != n:
+            raise ValueError(
+                "read_sds: comma-separated NETWORK, STATION, LOCATION, CHANNEL must have "
+                "matching lengths (or length 1 to broadcast). %s has %d value(s) but max length is %d."
+                % (name, len(lst), n))
+    if len(nets) == 1:
+        nets = nets * n
+    if len(stas) == 1:
+        stas = stas * n
+    if len(locs) == 1:
+        locs = locs * n
+    if len(chas) == 1:
+        chas = chas * n
+    
     # Initialize SDS client
     client = SDS_Client(sds_root)
     
-    # Get waveforms
-    stream = client.get_waveforms(network=network, station=station, location=location, 
-                                  channel=channel, starttime=starttime, endtime=endtime, 
-                                  merge=merge)
+    if n == 1:
+        stream = client.get_waveforms(network=nets[0], station=stas[0], location=locs[0],
+                                      channel=chas[0], starttime=starttime, endtime=endtime,
+                                      merge=merge)
+    else:
+        bulk = [(nets[i], stas[i], locs[i], chas[i], starttime, endtime) for i in range(n)]
+        stream = client.get_waveforms_bulk(bulk)
+        if merge is not None:
+            stream.merge(merge)
     
     if verbose:
         if len(stream) == 0:
